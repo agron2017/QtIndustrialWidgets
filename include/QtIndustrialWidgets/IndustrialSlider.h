@@ -96,7 +96,9 @@ class IndustrialSliderAccessible;
  *   take the setpoint outside [setpointLimitLow(), setpointLimitHigh()], and Home/End go to the limits; from a
  *   setpoint outside the limits, input towards them is applied and input that would take it further out is
  *   ignored. setSetpoint() is bound by the range only. On the scale the band of the ticks is hatched outside the
- *   limits, and each limit inside the range has a stop mark across the zone band and the ticks.
+ *   limits, and each limit inside the range has a stop mark across the zone band and the ticks. The limits are also
+ *   the properties setpointLimitLow and setpointLimitHigh (#246), for Qt Designer and .ui files, each bound with its
+ *   own setter and reset (setSetpointLimitLow(), resetSetpointLimitLow(), ...); a bound not set follows the range.
  *
  * Focus: the slider takes focus with Tab, Shift+Tab and a click (Qt::StrongFocus), also in read-only, and while it
  * has focus draws a solid 2 px ring in textColor() along the edge of the widget, in the margin kept free of the
@@ -138,6 +140,11 @@ class QTINDUSTRIALWIDGETS_EXPORT IndustrialSlider : public QWidget
     Q_PROPERTY(Qt::Orientation orientation READ orientation WRITE setOrientation NOTIFY appearanceChanged)
     Q_PROPERTY(double minimum READ minimum WRITE setMinimum NOTIFY rangeChanged)
     Q_PROPERTY(double maximum READ maximum WRITE setMaximum NOTIFY rangeChanged)
+    // #246: after minimum and maximum, the order in which Designer writes them and a .ui file applies them
+    Q_PROPERTY(double setpointLimitLow READ setpointLimitLow WRITE setSetpointLimitLow RESET resetSetpointLimitLow
+                   NOTIFY setpointLimitsChanged)
+    Q_PROPERTY(double setpointLimitHigh READ setpointLimitHigh WRITE setSetpointLimitHigh RESET resetSetpointLimitHigh
+                   NOTIFY setpointLimitsChanged)
     Q_PROPERTY(double setpoint READ setpoint WRITE setSetpoint NOTIFY setpointChanged)
     Q_PROPERTY(double feedback READ feedback WRITE setFeedback NOTIFY feedbackChanged)
     Q_PROPERTY(double rawFeedback READ rawFeedback)
@@ -269,9 +276,9 @@ public:
      * actions. While it is true, setSetpoint() is held (see setSetpoint()).
      */
     [[nodiscard]] bool isOperatorActive() const;
-    /** \brief Returns the low setpoint limit as read: the one set, within the range; without limits, minimum(). */
+    /** \brief Returns the low setpoint limit as read: the one set, within the range; not set, minimum(). */
     [[nodiscard]] double setpointLimitLow() const;
-    /** \brief Returns the high setpoint limit as read: the one set, within the range; without limits, maximum(). */
+    /** \brief Returns the high setpoint limit as read: the one set, within the range; not set, maximum(). */
     [[nodiscard]] double setpointLimitHigh() const;
 
     [[nodiscard]] QSize sizeHint() const override;
@@ -373,6 +380,27 @@ public Q_SLOTS:
     void setSetpointLimits(double low, double high);
     /** \brief Removes the setpoint limits: they are the range again. Emits setpointLimitsChanged() if they change. */
     void clearSetpointLimits();
+    /**
+     * \brief Sets the low setpoint limit alone (#246), as the property setpointLimitLow does.
+     *
+     * A high limit not set stays not set: it reads maximum() and follows the range, whatever \a low. A high limit
+     * set, at or below \a low, moves to \a low plus the previous span (with minimum() for a low limit not set), so
+     * that the order of the two calls does not matter: limits 20–40, then setSetpointLimitLow(60), give 60–80.
+     * When that span is not positive (the high limit kept below a minimum that went up), the high limit goes to
+     * \a low, so the limits are never inverted. Non-finite values are ignored. The limit is kept as given and read
+     * within the range, so setpointLimitLow() gives back \a low when it is inside the range.
+     * Emits setpointLimitsChanged() if the limits read change.
+     */
+    void setSetpointLimitLow(double low);
+    /** \brief Sets the high setpoint limit alone (#246): the rule of setSetpointLimitLow() the other way round. */
+    void setSetpointLimitHigh(double high);
+    /**
+     * \brief Clears the low setpoint limit only (#246, the RESET of the property): it reads minimum() and follows
+     * the range; the high limit keeps its state. Emits setpointLimitsChanged() if the limits read change.
+     */
+    void resetSetpointLimitLow();
+    /** \brief Clears the high setpoint limit only (#246): it reads maximum(); see resetSetpointLimitLow(). */
+    void resetSetpointLimitHigh();
 
 Q_SIGNALS:
     /** \brief Emitted when setpoint() changes, whatever the source. */

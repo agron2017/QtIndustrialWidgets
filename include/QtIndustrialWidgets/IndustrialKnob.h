@@ -67,7 +67,9 @@ class IndustrialKnobAccessible;
  *   limits, input towards them is applied and input that would take the value further out is ignored. setValue()
  *   is bound by the range only, so a value read back from a device outside the limits is shown as it is. On the
  *   scale the parts outside the limits are hatched and each limit has a radial stop mark. In Discrete mode the
- *   operator reaches only the steps inside the limits.
+ *   operator reaches only the steps inside the limits. The limits are also the properties valueLimitLow and
+ *   valueLimitHigh (#246), for Qt Designer and .ui files, each bound with its own setter and reset
+ *   (setValueLimitLow(), resetValueLimitLow(), ...); a bound not set follows the range.
  *
  * Focus and accessibility (#183): the knob takes focus with Tab, Shift+Tab and a click, also in read-only, and
  * draws a solid ring in textColor() just outside the grip while it has focus. Its accessible interface has the role
@@ -102,6 +104,11 @@ class QTINDUSTRIALWIDGETS_EXPORT IndustrialKnob : public QWidget
 
     Q_PROPERTY(double minimum READ minimum WRITE setMinimum NOTIFY rangeChanged)
     Q_PROPERTY(double maximum READ maximum WRITE setMaximum NOTIFY rangeChanged)
+    // #246: after minimum and maximum, the order in which Designer writes them and a .ui file applies them
+    Q_PROPERTY(double valueLimitLow READ valueLimitLow WRITE setValueLimitLow RESET resetValueLimitLow
+                   NOTIFY valueLimitsChanged)
+    Q_PROPERTY(double valueLimitHigh READ valueLimitHigh WRITE setValueLimitHigh RESET resetValueLimitHigh
+                   NOTIFY valueLimitsChanged)
     Q_PROPERTY(double value READ value WRITE setValue NOTIFY valueChanged)
     Q_PROPERTY(double step READ step WRITE setStep NOTIFY appearanceChanged)
     Q_PROPERTY(double pageStep READ pageStep WRITE setPageStep RESET resetPageStep NOTIFY appearanceChanged)
@@ -198,15 +205,15 @@ public:
     /**
      * \brief Returns the low value limit of the operator's input (#182).
      *
-     * The limit set with setValueLimits(), within the range: a limit below minimum() reads minimum(). Without limits,
-     * minimum().
+     * The limit set with setValueLimits() or setValueLimitLow(), within the range: a limit below minimum() reads
+     * minimum(). Not set, minimum().
      */
     [[nodiscard]] double valueLimitLow() const;
     /**
      * \brief Returns the high value limit of the operator's input (#182).
      *
-     * The limit set with setValueLimits(), within the range: a limit above maximum() reads maximum(). Without limits,
-     * maximum().
+     * The limit set with setValueLimits() or setValueLimitHigh(), within the range: a limit above maximum() reads
+     * maximum(). Not set, maximum().
      */
     [[nodiscard]] double valueLimitHigh() const;
 
@@ -304,6 +311,27 @@ public Q_SLOTS:
     void setValueLimits(double low, double high);
     /** \brief Removes the value limits: they are the range again (#182). Emits valueLimitsChanged() if they change. */
     void clearValueLimits();
+    /**
+     * \brief Sets the low value limit alone (#246), as the property valueLimitLow does.
+     *
+     * A high limit not set stays not set: it reads maximum() and follows the range, whatever \a low. A high limit
+     * set, at or below \a low, moves to \a low plus the previous span (with minimum() for a low limit not set), so
+     * that the order of the two calls does not matter: limits 20–40, then setValueLimitLow(60), give 60–80.
+     * When that span is not positive (the high limit kept below a minimum that went up), the high limit goes to
+     * \a low, so the limits are never inverted. Non-finite values are ignored. The limit is kept as given and read
+     * within the range, so valueLimitLow() gives back \a low when it is inside the range.
+     * Emits valueLimitsChanged() if the limits read change.
+     */
+    void setValueLimitLow(double low);
+    /** \brief Sets the high value limit alone (#246): the rule of setValueLimitLow() the other way round. */
+    void setValueLimitHigh(double high);
+    /**
+     * \brief Clears the low value limit only (#246, the RESET of the property): it reads minimum() and follows the
+     * range; the high limit keeps its state. Emits valueLimitsChanged() if the limits read change.
+     */
+    void resetValueLimitLow();
+    /** \brief Clears the high value limit only (#246): it reads maximum(); see resetValueLimitLow(). */
+    void resetValueLimitHigh();
 
 Q_SIGNALS:
     /** \brief Emitted at every change of the value, from the operator or from the application. */
@@ -324,7 +352,7 @@ Q_SIGNALS:
     void operatorActiveChanged(bool active);
     /**
      * \brief Emitted when valueLimitLow() or valueLimitHigh() change (#182): from setValueLimits(),
-     * clearValueLimits(), or a range change that moves the limits read.
+     * clearValueLimits(), the setter or reset of one bound (#246), or a range change that moves the limits read.
      */
     void valueLimitsChanged(double low, double high);
     /** \brief Emitted when the knob mode changes. */

@@ -5,6 +5,7 @@
 #include <QtTest/QtTest>
 #include <QtIndustrialWidgets/RadialGauge.h>
 
+#include "ScaleLabelCases.h"
 #include "FontTestUtils.h"
 #include "ScreenChangeTestUtils.h"
 #include "LabelInkTestUtils.h"
@@ -239,6 +240,25 @@ LabelInkRender labelInk(RadialGauge &gauge)
     return out;
 }
 
+// #208: the texts of the major labels, as the gauge writes them (the decimals of the whole scale)
+QStringList majorLabelTexts(const RadialGauge &gauge)
+{
+    std::vector<double> values;
+    for (int i = 0; i <= gauge.majorTicks(); ++i) {
+        const double frac = static_cast<double>(i) / gauge.majorTicks();
+        values.push_back(gauge.minimum() + frac * (gauge.maximum() - gauge.minimum()));
+    }
+    return internal::scaleLabelTexts(values, gauge.precision());
+}
+
+// The text of the major label nearest to \a value
+QString majorLabelText(const RadialGauge &gauge, double value)
+{
+    const double frac = (value - gauge.minimum()) / (gauge.maximum() - gauge.minimum());
+    const int index = static_cast<int>(std::lround(frac * gauge.majorTicks()));
+    return majorLabelTexts(gauge).at(std::clamp(index, 0, gauge.majorTicks()));
+}
+
 // Device-pixel box of the scale label of \a value on the gauge at its size
 QRect labelBox(const RadialGauge &gauge, double value)
 {
@@ -246,7 +266,7 @@ QRect labelBox(const RadialGauge &gauge, double value)
     QFont font = gauge.font();
     font.setPixelSize(geo.labelFontPx);
     font.setBold(true);
-    const QRectF text = QFontMetricsF(font).boundingRect(internal::scaleLabelText(value, gauge.precision()));
+    const QRectF text = QFontMetricsF(font).boundingRect(majorLabelText(gauge, value));
     const double frac = (value - gauge.minimum()) / (gauge.maximum() - gauge.minimum());
     const double angle = (gauge.startAngle() + frac * gauge.spanAngle() - 90.0) * M_PI / 180.0;
     const double x = gauge.width() * 0.5 + geo.labelRadius * std::cos(angle) - text.width() * 0.5;
@@ -324,6 +344,8 @@ private Q_SLOTS:
     void screenChangeOfAVisibleRadialGauge_data();
     void screenChangeOfAVisibleRadialGauge();
     void textSizeIgnoresWidgetFontSize();
+    void scaleLabelsFollowThePrecision_data();
+    void scaleLabelsFollowThePrecision();
     void fontChangeRefreshesCache();
     void labelsFollowWidgetFont();
     void initTestCase();
@@ -686,11 +708,11 @@ internal::PodLayoutInput podInputOf(const RadialGauge &gauge)
 
     std::vector<internal::LayoutRect> boxes;
     const int ticks = gauge.majorTicks();
-    const double range = gauge.maximum() - gauge.minimum();
+    const QStringList labelTexts = majorLabelTexts(gauge);
     for (int i = 0; i <= ticks; ++i) {
         const double frac = static_cast<double>(i) / ticks;
         const double rad = (gauge.startAngle() + frac * gauge.spanAngle() - 90.0) * M_PI / 180.0;
-        const QRectF text = fm.boundingRect(internal::scaleLabelText(gauge.minimum() + frac * range, gauge.precision()));
+        const QRectF text = fm.boundingRect(labelTexts.at(i));
         boxes.push_back({gauge.width() * 0.5 + geo.labelRadius * std::cos(rad) - text.width() * 0.5,
                          gauge.height() * 0.5 + geo.labelRadius * std::sin(rad) - text.height() * 0.5, text.width(), text.height()});
     }
@@ -832,42 +854,35 @@ void tst_RadialGauge::valueReadoutHasNoNegativeZero()
                             .arg(-magnitude).arg(magnitude).arg(negative.size()).arg(positive.size()).arg(precision)));
 }
 
-// #46: range -0.1..0.1 with 5 major ticks: tick 2 is -0.02 and tick 3 is +0.02, both "0.0". The two
-// labels sit symmetrically at -27 and +27 degrees (labels are 54 degrees apart); the label ink within
-// +-15 degrees of each tick must be equally wide (a minus sign makes tick 2 wider). 1 device px is
-// left to the sub-pixel position of the glyphs.
+// #46: no scale label that is zero starts with '-'. Range -0.1..0.5 with 6 major ticks at precision 1: tick 1 is
+// -1.4e-17, labelled "0.0" with the 1 decimal that writes every tick exactly (#208). The texts are those the gauge
+// measures as label boxes in minimumSizeHint(), the texts of its scale labels (as in scaleLabelsFollowThePrecision)
 void tst_RadialGauge::scaleLabelsHaveNoNegativeZero()
 {
     RadialGauge gauge;
-    configure(gauge, GaugeConfig{300, -0.1, 0.1, 1, -135.0, 270.0});
-    gauge.setMajorTicks(5);
-    gauge.setDigitalDisplayVisible(false);
-
-    gauge.setTextColor(Qt::white);
-    const QImage white = renderGauge(gauge);
-    gauge.setTextColor(Qt::red);
-    const QImage red = renderGauge(gauge);
-    const qreal dpr = white.devicePixelRatio();
-    const QPointF centre(white.width() * 0.5, white.height() * 0.5);
-
-    const QVector<QPoint> ink = TextInk::differingPixels(white, red);
-    auto inkInSector = [&](double angleDeg) {
-        QRect box;
-        for (const QPoint &p : ink) {
-            const double a = std::atan2(p.x() + 0.5 - centre.x(), centre.y() - (p.y() + 0.5)) * 180.0 / M_PI;
-            if (std::abs(std::remainder(a - angleDeg, 360.0)) <= 15.0) {
-                box |= QRect(p, QSize(1, 1));
-            }
-        }
-        return box;
-    };
-    const QRect tick2 = inkInSector(-27.0);
-    const QRect tick3 = inkInSector(27.0);
-    QVERIFY(!tick2.isEmpty());
-    QVERIFY(!tick3.isEmpty());
-    QVERIFY2(std::abs(tick2.width() - tick3.width()) <= 1,
-             qPrintable(QStringLiteral("label at -0.02 is %1 device px wide, label at +0.02 is %2 (DPR %3)")
-                            .arg(tick2.width()).arg(tick3.width()).arg(dpr)));
+    gauge.setRange(-0.1, 0.5);
+    gauge.setMajorTicks(6);
+    gauge.setPrecision(1);
+    QVERIFY(-0.1 + 1.0 / 6.0 * 0.6 < 0.0); // The tick is a negative zero
+    (void)gauge.minimumSizeHint();
+    const auto logs = internal::RadialGaugeTestAccess::lastMinimumMeasures(gauge);
+    QVERIFY(!logs.empty());
+    QStringList labels;
+    for (const auto &m : logs.at(0)) {
+        if (m.kind == internal::TextMetricsTable::Kind::BoundingRect && !labels.contains(m.text)) labels << m.text;
+    }
+    int zeros = 0;
+    for (const QString &text : labels) {
+        bool ok = false;
+        const double value = text.toDouble(&ok);
+        QVERIFY2(ok, qPrintable(QStringLiteral("label '%1' is not a number").arg(text)));
+        if (value != 0.0) continue;
+        ++zeros;
+        QVERIFY2(!text.startsWith(QLatin1Char('-')),
+                 qPrintable(QStringLiteral("label '%1' is a negative zero (labels: %2)").arg(text, labels.join(QLatin1Char(' ')))));
+    }
+    QVERIFY2(zeros == 1, qPrintable(QStringLiteral("%1 labels are zero, 1 expected (labels: %2)")
+                                        .arg(zeros).arg(labels.join(QLatin1Char(' ')))));
 }
 
 
@@ -925,7 +940,7 @@ void tst_RadialGauge::scaleLabelsKeepMinimumGap()
     const double threshold = (minGap - 1.0) * dpr;
 
     // Largest label drawn alone. Every row has integer tick values, which the gauge prints as
-    // integers at any precision (scaleLabelText())
+    // integers at any precision (scaleLabelTexts(), #208)
     const int majorTicks = gauge.majorTicks();
     QSize largest;
     for (int i = 0; i <= majorTicks; ++i) {
@@ -1278,8 +1293,8 @@ static void addMinimumTableRows()
     QTest::addRow("doubled font") << Setup([](RadialGauge &g) { g.setFont(FontTest::doubledFont()); });
     // Value texts (formatFixed() of the range ends) whose decimals decide the minimum
     QTest::addRow("precision 6") << Setup([](RadialGauge &g) { g.setPrecision(6); });
-    // Long fractional labels at the ends, which decide the minimum (sideKeepsScaleEnds()): scaleLabelText() writes
-    // 1000000.5 and 1000010.5 (whole labels have no decimals at any precision)
+    // Long fractional labels at the ends, which decide the minimum (sideKeepsScaleEnds()): scaleLabelTexts() writes
+    // 1000000.5 and 1000010.5 (every tick is a half, written exactly with 1 decimal)
     QTest::addRow("1000000.5 to 1000010.5, precision 1") << Setup([](RadialGauge &g) {
         g.setRange(1000000.5, 1000010.5);
         g.setPrecision(1);
@@ -1353,7 +1368,7 @@ void tst_RadialGauge::minimumMeasuresTheLabelTexts_data()
 }
 
 // #184: the label texts, formatted once per computation, are those of the ticks: the texts measured as label
-// boxes (boundingRect()) are exactly scaleLabelText() of each major tick at the precision
+// boxes (boundingRect()) are exactly the major labels, scaleLabelTexts() of the major ticks (#208)
 void tst_RadialGauge::minimumMeasuresTheLabelTexts()
 {
     using Setup = std::function<void(RadialGauge &)>;
@@ -1369,12 +1384,8 @@ void tst_RadialGauge::minimumMeasuresTheLabelTexts()
             measured.insert(m.text);
         }
     }
-    std::set<QString> expected;
-    for (int i = 0; i <= gauge.majorTicks(); ++i) {
-        const double frac = static_cast<double>(i) / gauge.majorTicks();
-        expected.insert(internal::scaleLabelText(gauge.minimum() + frac * (gauge.maximum() - gauge.minimum()),
-                                                 gauge.precision()));
-    }
+    const QStringList texts = majorLabelTexts(gauge);
+    const std::set<QString> expected(texts.cbegin(), texts.cend());
     const auto list = [](const std::set<QString> &texts) {
         return QStringList(texts.begin(), texts.end()).join(QStringLiteral(" | "));
     };
@@ -2022,6 +2033,35 @@ void tst_RadialGauge::screenChangeOfAVisibleRadialGauge()
     if (dpi != 96) {
         QVERIFY2(changed > 0, "the minimum is the same on both screens for every configuration");
     }
+}
+
+void tst_RadialGauge::scaleLabelsFollowThePrecision_data()
+{
+    ScaleLabelCases::addRows();
+}
+
+// #208: the scale labels have the decimals of the precision, as few as write every tick exactly, more only to keep
+// adjacent labels distinct. The texts minimumSizeHint() measures as label boxes, which paintEvent() draws (#184)
+void tst_RadialGauge::scaleLabelsFollowThePrecision()
+{
+    QFETCH(double, minimum);
+    QFETCH(double, maximum);
+    QFETCH(int, majorTicks);
+    QFETCH(int, precision);
+    QFETCH(QStringList, expected);
+    RadialGauge gauge;
+    gauge.setRange(minimum, maximum);
+    gauge.setMajorTicks(majorTicks);
+    gauge.setPrecision(precision);
+    (void)gauge.minimumSizeHint();
+    const auto logs = internal::RadialGaugeTestAccess::lastMinimumMeasures(gauge);
+    QVERIFY(!logs.empty());
+    std::set<QString> measured;
+    for (const auto &m : logs.at(0)) {
+        if (m.kind == internal::TextMetricsTable::Kind::BoundingRect) measured.insert(m.text);
+    }
+    const std::set<QString> labels(expected.cbegin(), expected.cend());
+    QCOMPARE(QStringList(measured.cbegin(), measured.cend()), QStringList(labels.cbegin(), labels.cend()));
 }
 
 QTEST_MAIN(tst_RadialGauge)

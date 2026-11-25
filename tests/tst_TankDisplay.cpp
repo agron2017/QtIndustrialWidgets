@@ -8,6 +8,8 @@
 #include <QtTest/QtTest>
 #include <QtIndustrialWidgets/TankDisplay.h>
 
+#include "ScaleLabelCases.h"
+#include "TextRecorder.h"
 #include "internal/FontScale.h"
 #include "internal/RadialGaugeLayout.h"
 #include "internal/TankDisplayLayout.h"
@@ -40,6 +42,8 @@ class tst_TankDisplay : public QObject
 
 private Q_SLOTS:
     void defaults();
+    void scaleLabelsFollowThePrecision_data();
+    void scaleLabelsFollowThePrecision();
     void newDisplayIsDrawnWithoutAValue();
     void valueStateAndRawValue();
     void signalOrder();
@@ -1220,10 +1224,14 @@ void tst_TankDisplay::minimumSizeHintFollowsTheConfiguration()
         < internal::kTankMarkerSize * 0.5 + internal::kTankBeyondGap + internal::kTankBeyondSign;
     check("limits enabled", [&] { QVERIFY(t->setLimits(10.0, 20.0, 80.0, 90.0)); }, true, endsGrow);
     check("wider labels", [&] { t->setRange(0.0, 100000.0); }, true, false);
-    // Labels with decimals: precision 0 rounds them to whole numbers (scaleLabelText())
-    t->setRange(0.0, 1.0);
+    // Thirds of 0..100: precision 0 writes them as whole numbers (adjacent labels distinct), precision 1 with one
+    // decimal (#208)
+    const int ticks = t->majorTicks();
+    t->setRange(0.0, 100.0);
+    t->setMajorTicks(3);
     t->setPrecision(0);
     check("decimals", [&] { t->setPrecision(1); }, true, false);
+    t->setMajorTicks(ticks);
     t->setRange(0.0, 100000.0);
     check("larger font", [&] { t->setFont(FontTest::doubledFont()); }, true, true);
     check("horizontal cylinder", [&] { t->setShape(TankShape::HorizontalCylinder); }, true, false);
@@ -1310,6 +1318,30 @@ void tst_TankDisplay::nonFiniteInput()
     const QImage img = render(t);
     const QRectF v = layoutOf(t).vessel;
     QVERIFY(near(at(img, v.center().x(), v.top() + 3.0), kContent));
+}
+
+void tst_TankDisplay::scaleLabelsFollowThePrecision_data()
+{
+    ScaleLabelCases::addRows();
+}
+
+// #208: the scale labels have the decimals of the precision, as few as write every tick exactly, more only to keep
+// adjacent labels distinct: the texts drawn, read from the painter
+void tst_TankDisplay::scaleLabelsFollowThePrecision()
+{
+    QFETCH(double, minimum);
+    QFETCH(double, maximum);
+    QFETCH(int, majorTicks);
+    QFETCH(int, precision);
+    QFETCH(QStringList, expected);
+    TankDisplay w;
+    w.setRange(minimum, maximum);
+    w.setMajorTicks(majorTicks);
+    w.setPrecision(precision);
+    w.resize(500, 700); // Every label drawn: nothing thinned out
+    const QStringList drawn = TextRecorder::drawnTexts(w);
+    QVERIFY2(TextRecorder::containsRun(drawn, expected),
+             qPrintable(QStringLiteral("drawn: %1").arg(drawn.join(QStringLiteral(" | ")))));
 }
 
 QTEST_MAIN(tst_TankDisplay)

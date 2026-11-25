@@ -5,6 +5,7 @@
 #include <QtTest/QtTest>
 #include <QtIndustrialWidgets/IndustrialKnob.h>
 
+#include "ScaleLabelCases.h"
 #include "ActionTestUtils.h"
 #include "FontTestUtils.h"
 #include "LabelInkTestUtils.h"
@@ -56,10 +57,14 @@ ScaleLabels scaleLabelsAt(const IndustrialKnob &knob, const internal::KnobScaleG
     const QFontMetricsF fm(out.font);
     const bool discrete = knob.mode() == IndustrialKnob::KnobMode::Discrete;
     const int ticks = std::max(1, discrete ? knob.discreteSteps() - 1 : knob.majorTicks());
+    std::vector<double> values;
+    for (int i = 0; i <= ticks; ++i) {
+        values.push_back(knob.minimum() + static_cast<double>(i) / ticks * (knob.maximum() - knob.minimum()));
+    }
+    const QStringList texts = internal::scaleLabelTexts(values, knob.precision()); // #208: decimals of the whole scale
     for (int i = 0; i <= ticks; ++i) {
         const double frac = static_cast<double>(i) / ticks;
-        const double value = knob.minimum() + frac * (knob.maximum() - knob.minimum());
-        const QString text = discrete ? QString::number(i + 1) : internal::scaleLabelText(value, knob.precision());
+        const QString text = discrete ? QString::number(i + 1) : texts.at(i);
         const QRectF rect = fm.boundingRect(text);
         const internal::LayoutRect box = internal::labelBoxOnDevicePixel(
             internal::knobLabelBox(geometry, knob.startAngle() + frac * knob.spanAngle(), rect.width(), rect.height()),
@@ -392,6 +397,8 @@ class tst_IndustrialKnob : public QObject
 
 private Q_SLOTS:
     void repaintDoesNotMeasureTheLabelsAgain();
+    void scaleLabelsFollowThePrecision_data();
+    void scaleLabelsFollowThePrecision();
     void textSizeIgnoresWidgetFontSize();
     void fontChangeRefreshesCache();
     void labelsFollowWidgetFont();
@@ -1913,6 +1920,33 @@ void tst_IndustrialKnob::dragGoesToTheStep()
     sendMouse(knob, QEvent::MouseButtonRelease, dialPoint(dial, to));
     QCOMPARE(knob.value(), v);
     QCOMPARE(committed.count(), v == start ? 0 : 1);
+}
+
+void tst_IndustrialKnob::scaleLabelsFollowThePrecision_data()
+{
+    ScaleLabelCases::addRows();
+}
+
+// #208: the scale labels have the decimals of the precision, as few as write every tick exactly, more only to keep
+// adjacent labels distinct: the texts minimumSizeHint() measures as label boxes, those the static scale draws
+void tst_IndustrialKnob::scaleLabelsFollowThePrecision()
+{
+    QFETCH(double, minimum);
+    QFETCH(double, maximum);
+    QFETCH(int, majorTicks);
+    QFETCH(int, precision);
+    QFETCH(QStringList, expected);
+    IndustrialKnob w;
+    w.setRange(minimum, maximum);
+    w.setMajorTicks(majorTicks);
+    w.setPrecision(precision);
+    (void)w.minimumSizeHint();
+    std::set<QString> measured;
+    for (const auto &m : internal::IndustrialKnobTestAccess::lastMinimumMeasures(w)) {
+        if (m.kind == internal::TextMetricsTable::Kind::BoundingRect) measured.insert(m.text);
+    }
+    const std::set<QString> labels(expected.cbegin(), expected.cend());
+    QCOMPARE(QStringList(measured.cbegin(), measured.cend()), QStringList(labels.cbegin(), labels.cend()));
 }
 
 QTEST_MAIN(tst_IndustrialKnob)

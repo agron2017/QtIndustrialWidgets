@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade notes
+Behaviour changes that can reach code using the library. The entries below give the details.
+
+- **`Compass`: the minimum size is no longer a fixed 110 × 110** (#226). It is `minimumSizeHint()`: 184 px at 96 dpi
+  with DejaVu Sans 9 pt, more with a wider font or a higher logical DPI. A `Compass` in a tight layout gets larger:
+  check the layouts that hold one. See [PR #275](https://github.com/paolosereno/QtIndustrialWidgets/pull/275).
+
 ### Added
 - **`operatorActive` on `IndustrialKnob`, `IndustrialSlider` and `ThumbwheelSwitch`** (#241): `isOperatorActive()` and
   `operatorActiveChanged()` tell the application when a drag or a held key is running. See
@@ -24,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Designer, `.ui` files and `setProperty()`. See [Controls](docs/widgets.md#controls).
 
 ### Changed
+- **`Compass`: the minimum size comes from the font, and the card texts fit from it up** (#226). `minimumSizeHint()` was
+  a fixed 110 × 110, at which the ring labels overlapped and touched the ticks; it is now computed from the widget font
+  at the logical DPI of the widget, and grows with a wider font. The constructor no longer calls `setMinimumSize()`, so
+  `minimumSize()` is no longer set by the widget. On a small card the label fonts go down to 7 pt, then every other
+  number is dropped, then all of them, then the intercardinals; N, E, S and W always stay. The readout font goes down
+  to 7 pt to fit the pod, with 1 logical px per side for the rasterizer, and the readout is centred on its ink; `HDG`
+  is at least 7 pt. At 96 dpi the minimum is 184 px with DejaVu Sans 9 pt and 227 px with a wide font (DejaVu Serif,
+  150 % letter spacing). The card follows the logical DPI of the widget, as the other gauges (#177), so it changes
+  only on a screen whose logical DPI differs from that of the primary screen. `sizeHint()` is never smaller than the
+  minimum. See [Compass](docs/widgets.md#compass).
 - **`setValue()` / `setSetpoint()` during an operator action is held** (#241), so a value read back from the device no
   longer moves the control under the operator or cancels the commit. At the end it is dropped after a commit and
   applied without one. See [Controls](docs/widgets.md#controls).
@@ -61,6 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Designer plugin in CI: warnings as errors and Windows** (#245): the job that installs the plugin into Qt's
   prefix configures with `CMAKE_COMPILE_WARNING_AS_ERROR=ON`, and the Windows job builds the plugin with MSVC and runs
   `tst_DesignerPlugin`; it fails if the plugin is not built. See [ci.yml](.github/workflows/ci.yml).
+- **Expected skips in `tools/run_configs.py` and `tools/mutation_check.py`** (#226): a skip still fails a configuration
+  (#189) unless `tests/expected_skips.json` lists it, with the test function, the data rows, the configurations and the
+  reason. It lists the pixel checks of the rotated `Compass` labels where no glyph is drawn for them (no fonts, or the
+  test font without letters); there the labels are checked on the layout geometry.
 
 ---
 
